@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use sqlx::*;
+use std::sync::Arc;
 
 use axum::{
     extract::{Path, Query, State},
@@ -8,11 +8,12 @@ use axum::{
     Json,
 };
 use serde_json::json;
+use uuid::Uuid;
 
 use crate::{
     model::UserModel,
     schema::{CreateUserSchema, FilterOptions, UpdateUserSchema},
-    AppState, 
+    AppState,
 };
 
 pub async fn health_checker_handler() -> impl IntoResponse {
@@ -66,12 +67,43 @@ pub async fn create_user_handler(
     State(data): State<Arc<AppState>>,
     Json(body): Json<CreateUserSchema>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    // checks if signup is with referral code 
+    if let Some(x) = body.ref_code {
+        // check if code exits
+        // increment user count for code owner
+        let query_result = sqlx::query_as!(UserModel, "SELECT * FROM users WHERE ref_code = $1", x)
+            .fetch_one(&data.db)
+            .await;
+
+        match query_result {
+            Ok(user) => {
+                let user_response = serde_json::json!({"status": "success","data": serde_json::json!({
+                    "user": user
+                })});
+
+                println!("{user_response}")
+            }
+            Err(_) => {
+                let error_response = serde_json::json!({
+                    "status": "fail",
+                    "message": format!("User with referral code: {} not found", x)
+                });
+                return Err((StatusCode::NOT_FOUND, Json(error_response)));
+            }
+        }
+    }
+
+    // creates new referral code 
+    let ref_id = Uuid::new_v4().to_string();
+    let code = format!("{}{}", &body.user_name[0..3], &ref_id[0..4]);
+
+    // add user to db
     let query_result = sqlx::query_as!(
         UserModel,
         "INSERT INTO users (email, user_name, ref_code) VALUES ($1, $2, $3) RETURNING *",
         body.email.to_string(),
         body.user_name.to_string(),
-        body.ref_code.to_string()
+        code
     )
     .fetch_one(&data.db)
     .await;
@@ -90,7 +122,7 @@ pub async fn create_user_handler(
             {
                 let error_response = serde_json::json!({
                     "status": "fail",
-                    "message": "user with that title already exists",
+                    "message": "user with that email already exists",
                 });
                 return Err((StatusCode::CONFLICT, Json(error_response)));
             }
@@ -150,16 +182,14 @@ pub async fn edit_user_handler(
 
     let query_result = sqlx::query_as!(
         UserModel,
-        "UPDATE users SET email = $1, user_name = $2, ref_code = $3, updated_at = $4 WHERE id = $5 RETURNING *",
+        "UPDATE users SET email = $1, user_name = $2, updated_at = $3 WHERE id = $4 RETURNING *",
         body.email.to_owned().unwrap_or(user.email),
         body.user_name.to_owned().unwrap_or(user.user_name),
-        body.ref_code.to_owned().unwrap_or(user.ref_code),
         now,
         id
     )
     .fetch_one(&data.db)
-    .await
-    ;
+    .await;
 
     match query_result {
         Ok(user) => {
