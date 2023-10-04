@@ -8,6 +8,7 @@ CREATE TABLE
         user_name VARCHAR(255) NOT NULL UNIQUE,
         email VARCHAR(255) NOT NULL UNIQUE,
         ref_code TEXT NOT NULL,
+        added_by_ref_code INT NOT NULL,
         created_at TIMESTAMP
         WITH
             TIME ZONE DEFAULT NOW(),
