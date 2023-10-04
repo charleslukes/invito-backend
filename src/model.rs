@@ -9,6 +9,7 @@ pub struct UserModel {
     pub user_name: String,
     pub email: String,
     pub ref_code: String,
+    pub added_by_ref_code: i32,
     #[serde(rename = "createdAt")]
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(rename = "updatedAt")]
