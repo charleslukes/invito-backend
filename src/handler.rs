@@ -67,7 +67,7 @@ pub async fn create_user_handler(
     State(data): State<Arc<AppState>>,
     Json(body): Json<CreateUserSchema>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
-    // checks if signup is with referral code 
+    // checks if signup is with referral code
     if let Some(x) = body.ref_code {
         // check if code exits
         // increment user count for code owner
@@ -77,11 +77,13 @@ pub async fn create_user_handler(
 
         match query_result {
             Ok(user) => {
-                let user_response = serde_json::json!({"status": "success","data": serde_json::json!({
-                    "user": user
-                })});
-
-                println!("{user_response}")
+                //update the ref user count
+                let _ = sqlx::query_as!(
+                    UserModel,
+                    "UPDATE users SET added_by_ref_code = added_by_ref_code + 1 WHERE id = $1",
+                    user.id
+                )
+                .fetch_one(&data.db);
             }
             Err(_) => {
                 let error_response = serde_json::json!({
@@ -93,24 +95,27 @@ pub async fn create_user_handler(
         }
     }
 
-    // creates new referral code 
+    // creates new referral code
     let ref_id = Uuid::new_v4().to_string();
     let code = format!("{}{}", &body.user_name[0..3], &ref_id[0..4]);
 
     // add user to db
     let query_result = sqlx::query_as!(
         UserModel,
-        "INSERT INTO users (email, user_name, ref_code) VALUES ($1, $2, $3) RETURNING *",
+        "INSERT INTO users (email, user_name, ref_code, added_by_ref_code) VALUES ($1, $2, $3, $4) RETURNING *",
         body.email.to_string(),
         body.user_name.to_string(),
-        code
+        code, 
+        0
     )
     .fetch_one(&data.db)
     .await;
 
     match query_result {
         Ok(user) => {
-            let user_response = json!({"status": "success","data": json!({
+            let user_response = json!({"status": "success",
+                "message": "User created successfully",
+                "data": json!({
                 "user": user
             })});
 
@@ -135,12 +140,16 @@ pub async fn create_user_handler(
 }
 
 pub async fn get_user_handler(
-    Path(id): Path<uuid::Uuid>,
+    Path(user_name): Path<String>,
     State(data): State<Arc<AppState>>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
-    let query_result = sqlx::query_as!(UserModel, "SELECT * FROM users WHERE id = $1", id)
-        .fetch_one(&data.db)
-        .await;
+    let query_result = sqlx::query_as!(
+        UserModel,
+        "SELECT * FROM users WHERE user_name = $1",
+        user_name
+    )
+    .fetch_one(&data.db)
+    .await;
 
     match query_result {
         Ok(user) => {
@@ -148,12 +157,12 @@ pub async fn get_user_handler(
                 "user": user
             })});
 
-            return Ok(Json(user_response));
+            return Ok((StatusCode::OK, Json(user_response)));
         }
         Err(_) => {
             let error_response = serde_json::json!({
                 "status": "fail",
-                "message": format!("User with ID: {} not found", id)
+                "message": format!("{} not found", user_name)
             });
             return Err((StatusCode::NOT_FOUND, Json(error_response)));
         }
