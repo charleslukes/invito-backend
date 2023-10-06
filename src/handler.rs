@@ -1,11 +1,15 @@
 use sqlx::*;
 use std::sync::Arc;
+use tokio_stream::{StreamExt as _ , wrappers::BroadcastStream};
+use futures_util::stream::{self, Stream};
 
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    response::IntoResponse,
+    response::{IntoResponse, sse::{Event, Sse}},
     Json,
+    TypedHeader,
+    headers,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -25,6 +29,26 @@ pub async fn health_checker_handler() -> impl IntoResponse {
     });
 
     Json(json_response)
+}
+
+
+pub async fn sse_handler(
+    State(app): State<Arc<AppState>>,
+    TypedHeader(user_agent): TypedHeader<headers::UserAgent>,
+) -> Sse<impl Stream<Item = Result<Event, serde_json::Error>>> {
+    println!("`{}` connected", user_agent.as_str());
+   
+    let stream = BroadcastStream::new(app.tx.subscribe())
+        .map(|i| Event::default().json_data(i.unwrap()));
+
+    let res = stream::once(async move {
+    let user_response = serde_json::json!({"status": "success","event_data": serde_json::json!({})});
+        Event::default().json_data(user_response)
+    });
+
+    let keep_alive_response = serde_json::json!({"status": "success","event_data": serde_json::json!({})});
+    Sse::new(res.chain(stream))
+    .keep_alive(axum::response::sse::KeepAlive::new().text(keep_alive_response.to_string()))
 }
 
 pub async fn users_list_handler(
@@ -83,7 +107,7 @@ pub async fn create_user_handler(
                     "UPDATE users SET added_by_ref_code = added_by_ref_code + 1 WHERE id = $1",
                     user.id
                 )
-                .fetch_one(&data.db);
+                .fetch_one(&data.db).await;
             }
             Err(_) => {
                 let error_response = serde_json::json!({
@@ -118,6 +142,10 @@ pub async fn create_user_handler(
                 "data": json!({
                 "user": user
             })});
+
+            // send notification to connected clients
+            let event_to_send = serde_json::json!({"status": "success","event_data": user});
+            data.tx.send(Json(event_to_send).to_string()).unwrap();
 
             return Ok((StatusCode::CREATED, Json(user_response)));
         }
