@@ -8,7 +8,7 @@ use axum::{
 use crate::{
     handler::{
         create_user_handler, delete_user_handler, edit_user_handler, get_user_handler,
-        health_checker_handler, users_list_handler,
+        health_checker_handler, users_list_handler, sse_handler
     },
     AppState,
 };
@@ -16,6 +16,7 @@ use crate::{
 pub fn create_router(app_state: Arc<AppState>) -> Router {
     Router::new()
         .route("/api/healthchecker", get(health_checker_handler))
+        .route("/api/user-events", get(sse_handler))
         .route(
             "/api/users",
             get(users_list_handler).post(create_user_handler),
