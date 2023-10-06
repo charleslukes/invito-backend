@@ -11,12 +11,14 @@ use axum::http::{
 };
 use dotenv::dotenv;
 use route::create_router;
+use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
 
 use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 
 pub struct AppState {
     db: Pool<Postgres>,
+    tx: broadcast::Sender<String>,
 }
 
 #[tokio::main]
@@ -45,7 +47,13 @@ async fn main() {
         .allow_credentials(true)
         .allow_headers([AUTHORIZATION, ACCEPT, CONTENT_TYPE]);
 
-    let app = create_router(Arc::new(AppState { db: pool.clone() })).layer(cors);
+    let (tx, _rx) = broadcast::channel(100);
+
+    let app = create_router(Arc::new(AppState {
+        db: pool.clone(),
+        tx,
+    }))
+    .layer(cors);
 
     println!("🚀 Server started successfully");
     axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
